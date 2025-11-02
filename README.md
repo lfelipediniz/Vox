@@ -322,7 +322,7 @@ O projeto Vox é composto por três repositórios principais:
 |-------------|-----------|------|
 | **Vox** | Aplicativo Android para entrada e conversão de voz | [lfelipediniz/Vox](https://github.com/lfelipediniz/Vox) |
 | **WebSocketAPI** | API de intermediação em tempo real | [lfelipediniz/WebSocketAPI](https://github.com/lfelipediniz/WebSocketAPI) |
-| **n8n + MCP** | Orquestração e integração DroidRun | [Educg550/n8n_whatsapp](https://github.com/Educg550/n8n_whatsapp) |
+| **n8n + MCP** | Orquestração e integração DroidRun | [Educg550/n8n-mcp-orchestrator](https://github.com/Educg550/n8n-mcp-orchestrator) |
 
 ---
 
