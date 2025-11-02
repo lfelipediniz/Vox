@@ -230,41 +230,6 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                 ),
               ),
             ),
-          if (_isListening)
-            Align(
-              alignment: Alignment.topCenter,
-              child: Container(
-                margin: const EdgeInsets.only(top: 100),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                width: math.min(screenSize.width - 64, 260),
-                decoration: BoxDecoration(
-                  color: _bubbleColor,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _bubbleColor.withOpacity(0.45),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: const Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  alignment: WrapAlignment.center,
-                  spacing: 8,
-                  children: [
-                    Icon(Icons.mic, color: Colors.white),
-                    Text(
-                      'Gravando...',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
           Positioned(
             top: _position.dy.clamp(0.0, maxY),
             left: _position.dx.clamp(0.0, maxX),
