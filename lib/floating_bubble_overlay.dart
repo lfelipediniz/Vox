@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+
+import 'package:voxaccess/services/chat_session_manager.dart';
 
 class FloatingBubbleWidget extends StatefulWidget {
   const FloatingBubbleWidget({super.key});
@@ -18,6 +20,11 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
   final double _bubbleSize = 60;
   final Color _bubbleColor = const Color(0xFF2196F3);
 
+  final ChatSessionManager _chatManager = ChatSessionManager.instance;
+  StreamSubscription<ChatMessage>? _messagesSub;
+  StreamSubscription<bool>? _canSendSub;
+  StreamSubscription<ChatConnectionStatus>? _statusSub;
+
   Offset _position = Offset.zero;
   bool _positionInitialized = false;
   bool _isDragging = false;
@@ -27,11 +34,16 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
   bool _isListening = false;
   String _transcribedText = '';
   String? _errorMessage;
+  String? _lastIncomingText;
+  bool _canSendMessage = false;
+  ChatConnectionStatus _connectionStatus = ChatConnectionStatus.disconnected;
+  bool _isPreparingSession = true;
 
   @override
   void initState() {
     super.initState();
     _initializeSpeechEngine();
+    _prepareChatSession();
   }
 
   Future<void> _initializeSpeechEngine() async {
@@ -55,6 +67,50 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
         _errorMessage = 'Erro ao inicializar o microfone.';
       });
     }
+  }
+
+  Future<void> _prepareChatSession() async {
+    try {
+      await _chatManager.initialize();
+      await _chatManager.ensureSession();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Não foi possível conectar ao chat. Tente novamente.';
+      });
+    }
+
+    if (!mounted) return;
+
+    _statusSub = _chatManager.connectionStatusStream.listen((status) {
+      if (!mounted) return;
+      setState(() {
+        _connectionStatus = status;
+      });
+    });
+
+    _canSendSub = _chatManager.canSendStream.listen((canSend) {
+      if (!mounted) return;
+      setState(() {
+        _canSendMessage = canSend;
+      });
+    });
+
+    final myUserId = _chatManager.userId;
+    _messagesSub = _chatManager.messagesStream.listen((message) {
+      if (!mounted) return;
+      if (message.userId != myUserId) {
+        setState(() {
+          _lastIncomingText = message.text;
+        });
+      }
+    });
+
+    setState(() {
+      _connectionStatus = _chatManager.currentStatus;
+      _canSendMessage = _chatManager.canSendValue;
+      _isPreparingSession = false;
+    });
   }
 
   void _onSpeechStatus(String status) {
@@ -90,6 +146,20 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
   Future<void> _startListening() async {
     if (_isDragging) return;
     if (!await _ensureMicPermission()) return;
+
+    if (!_chatManager.canSendValue) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Aguarde a resposta antes de enviar outra mensagem.';
+        });
+      }
+      return;
+    }
+
+    final isReady = await _ensureSessionReady();
+    if (!isReady) {
+      return;
+    }
 
     if (!_speechAvailable) {
       await _initializeSpeechEngine();
@@ -135,7 +205,7 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
       _isListening = false;
     });
     if (!canceled && _transcribedText.isNotEmpty) {
-      FlutterOverlayWindow.shareData(_transcribedText);
+      await _submitCapturedText(_transcribedText);
     }
   }
 
@@ -146,11 +216,75 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
     });
   }
 
+  Future<bool> _ensureSessionReady() async {
+    try {
+      await _chatManager.ensureSession();
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      setState(() {
+        _errorMessage = 'Erro ao conectar ao servidor. Confira sua conexão e tente novamente.';
+      });
+      return false;
+    }
+  }
+
+  Future<void> _submitCapturedText(String text) async {
+    final sanitized = text.trim();
+    if (sanitized.isEmpty) {
+      return;
+    }
+
+    try {
+      await _chatManager.sendMessage(sanitized);
+      if (!mounted) return;
+      setState(() {
+        _transcribedText = '';
+        if (sanitized.toLowerCase() == 'done') {
+          _lastIncomingText = 'Conversa encerrada. Toque e segure para iniciar outra sessão';
+        } else {
+          _lastIncomingText = null;
+        }
+      });
+    } on ChatTurnViolationException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.message;
+      });
+    } on ChatSendException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = error.message;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Falha inesperada ao enviar a mensagem.';
+      });
+    }
+  }
+
   @override
   void dispose() {
     _speech.stop();
     _speech.cancel();
+    _messagesSub?.cancel();
+    _canSendSub?.cancel();
+    _statusSub?.cancel();
     super.dispose();
+  }
+
+  String _statusLabel(ChatConnectionStatus status) {
+    switch (status) {
+      case ChatConnectionStatus.connected:
+        return 'Conectado';
+      case ChatConnectionStatus.connecting:
+        return 'Conectando…';
+      case ChatConnectionStatus.error:
+        return 'Erro de conexão';
+      case ChatConnectionStatus.disconnected:
+        return _isPreparingSession ? 'Preparando…' : 'Desconectado';
+    }
   }
 
   @override
@@ -173,6 +307,21 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
       color: Colors.transparent,
       child: Stack(
         children: [
+          Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              margin: const EdgeInsets.only(top: 32),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                _statusLabel(_connectionStatus),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
           if (_transcribedText.isNotEmpty)
             Align(
               alignment: Alignment.bottomCenter,
@@ -206,6 +355,32 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                 ),
               ),
             ),
+            if (_lastIncomingText != null && _lastIncomingText!.isNotEmpty)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(
+                  margin: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    bottom: _transcribedText.isNotEmpty ? 120 : 40,
+                  ),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.85),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  width: math.min(screenSize.width - 32, 420),
+                  child: Text(
+                    _lastIncomingText!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
           if (_errorMessage != null && _errorMessage!.isNotEmpty)
             Align(
               alignment: Alignment.topCenter,
@@ -274,14 +449,19 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      _bubbleColor,
-                      _bubbleColor.withOpacity(0.75),
-                    ],
+                    colors: _canSendMessage
+                        ? <Color>[
+                            _bubbleColor,
+                            _bubbleColor.withOpacity(0.75),
+                          ]
+                        : <Color>[
+                            Colors.grey.shade600,
+                            Colors.grey.shade400,
+                          ],
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: _bubbleColor.withOpacity(0.45),
+                      color: (_canSendMessage ? _bubbleColor : Colors.grey).withOpacity(0.45),
                       blurRadius: 12,
                       spreadRadius: 2,
                       offset: const Offset(0, 4),
@@ -289,7 +469,9 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                   ],
                 ),
                 child: Icon(
-                  _isListening ? Icons.mic : Icons.psychology,
+                  _isListening
+                      ? Icons.mic
+                      : (_canSendMessage ? Icons.psychology : Icons.lock_clock),
                   color: Colors.white,
                   size: 30,
                 ),
