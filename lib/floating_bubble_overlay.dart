@@ -143,6 +143,20 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
 
   void _onSpeechError(SpeechRecognitionError error) {
     if (!mounted) return;
+
+    if (error.errorMsg == 'error_speech_timeout' ||
+        error.errorMsg == 'error_no_match') {
+      final String buffered = _transcribedText.trim();
+      if (buffered.isNotEmpty) {
+        unawaited(_submitCapturedText(buffered));
+      }
+      setState(() {
+        _isListening = false;
+        _errorMessage = null;
+      });
+      return;
+    }
+
     setState(() {
       _isListening = false;
       _errorMessage = error.errorMsg;
@@ -167,11 +181,6 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
     if (!await _ensureMicPermission()) return;
 
     if (!_chatManager.canSendValue) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Aguarde a resposta antes de enviar outra mensagem.';
-        });
-      }
       return;
     }
 
@@ -181,22 +190,59 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
     }
 
     if (!_speechAvailable) {
-      await _initializeSpeechEngine();
-      if (!_speechAvailable) return;
+      try {
+        final available = await _speech.initialize(
+          onStatus: _onSpeechStatus,
+          onError: _onSpeechError,
+          debugLogging: false,
+        );
+        if (!available) {
+          if (mounted) {
+            setState(() {
+              _speechAvailable = false;
+              _errorMessage =
+                  'Não foi possível acessar o reconhecimento de voz agora.';
+            });
+          }
+          return;
+        }
+        if (!mounted) return;
+        setState(() {
+          _speechAvailable = true;
+          _errorMessage = null;
+        });
+      } catch (_) {
+        if (!mounted) return;
+        setState(() {
+          _speechAvailable = false;
+          _errorMessage = 'Falha ao preparar o reconhecimento de voz.';
+        });
+        return;
+      }
     }
 
     try {
-      await _speech.stop();
-      await _speech.cancel();
+      if (_speech.isListening) {
+        await _speech.stop();
+      } else {
+        await _speech.cancel();
+      }
       await _speech.listen(
         onResult: _onSpeechResult,
         listenMode: stt.ListenMode.dictation,
-        pauseFor: const Duration(seconds: 2),
-        listenFor: const Duration(minutes: 1),
+        pauseFor: const Duration(seconds: 8),
+        listenFor: const Duration(minutes: 2),
         partialResults: true,
         cancelOnError: true,
       );
       if (!mounted) return;
+      if (!_speech.isListening) {
+        setState(() {
+          _isListening = false;
+          _errorMessage = 'Não foi possível iniciar a gravação.';
+        });
+        return;
+      }
       setState(() {
         _isListening = true;
         _transcribedText = '';
@@ -207,6 +253,7 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
       setState(() {
         _isListening = false;
         _errorMessage = 'Não foi possível iniciar a gravação.';
+        _speechAvailable = false;
       });
     }
   }
@@ -260,6 +307,8 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
       if (!mounted) return;
       setState(() {
         _transcribedText = '';
+        _canSendMessage = false;
+        _errorMessage = null;
         if (sanitized.toLowerCase() == 'done') {
           _lastIncomingText =
               'Conversa encerrada. Toque e segure para iniciar outra sessão';
@@ -386,68 +435,6 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
               ),
             ),
           ),
-          if (_transcribedText.isNotEmpty)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                margin: const EdgeInsets.only(left: 16, right: 16, bottom: 40),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.75),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                width: math.min(screenSize.width - 32, 420),
-                constraints: BoxConstraints(
-                  minHeight: 72,
-                  maxHeight: screenSize.height * 0.5,
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    child: Text(
-                      _transcribedText,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500,
-                        height: 1.3,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (_lastIncomingText != null && _lastIncomingText!.isNotEmpty)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                margin: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  bottom: _transcribedText.isNotEmpty ? 120 : 40,
-                ),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.85),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                width: math.min(screenSize.width - 32, 420),
-                child: Text(
-                  _lastIncomingText!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ),
           if (_errorMessage != null && _errorMessage!.isNotEmpty)
             Align(
               alignment: Alignment.topCenter,
@@ -512,9 +499,18 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                   _stopListening();
                 }
               },
-              onLongPressStart: (_) => _startListening(),
-              onLongPressEnd: (_) => _stopListening(),
-              onLongPressCancel: () => _stopListening(canceled: true),
+              onLongPressStart: (_) {
+                if (!_canSendMessage || _isSpeaking) {
+                  return;
+                }
+                _startListening();
+              },
+              onLongPressEnd: (_) {
+                _stopListening();
+              },
+              onLongPressCancel: () {
+                _stopListening(canceled: true);
+              },
               child: Container(
                 width: _bubbleSize,
                 height: _bubbleSize,

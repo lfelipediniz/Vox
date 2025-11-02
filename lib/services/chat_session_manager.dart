@@ -39,7 +39,11 @@ class ChatMessage {
     return ChatMessage(
       roomId: _readString(json['room_id']) ?? _readString(json['roomId']) ?? '',
       userId: _readString(json['user_id']) ?? _readString(json['userId']) ?? '',
-      text: _readString(json['text']) ?? '',
+      text:
+          _readString(json['text']) ??
+          _readString(json['message']) ??
+          _readString(json['content']) ??
+          '',
       timestamp: (json['ts'] is String)
           ? int.tryParse(json['ts'] as String) ?? 0
           : (json['ts'] as num?)?.toInt() ?? 0,
@@ -301,37 +305,93 @@ class ChatSessionManager {
       }
 
       final int now = DateTime.now().millisecondsSinceEpoch;
+
+      ChatMessage? decoded;
+      try {
+        final dynamic jsonPayload = jsonDecode(rawText);
+        if (jsonPayload is Map<String, dynamic>) {
+          decoded = ChatMessage.fromJson(jsonPayload);
+        }
+      } catch (_) {
+        decoded = null;
+      }
+
+      if (decoded != null) {
+        final String? localUserId = _userId;
+        final bool isLocal =
+            localUserId != null && decoded.userId == localUserId;
+
+        bool isEcho = false;
+        if (isLocal) {
+          final String normalizedIncoming = decoded.text.trim();
+          final String? normalizedLastSent = _lastSentMessageText?.trim();
+          if (normalizedLastSent != null && normalizedIncoming.isNotEmpty) {
+            final bool sameContent = normalizedIncoming == normalizedLastSent;
+            final bool closeInTime =
+                _lastSentTimestampMs != null &&
+                (decoded.timestamp == 0 ||
+                    (decoded.timestamp - _lastSentTimestampMs!).abs() < 5000);
+            isEcho = sameContent && closeInTime;
+          } else if (normalizedLastSent == null && normalizedIncoming.isEmpty) {
+            isEcho = true;
+          }
+        }
+
+        if (isEcho) {
+          // Server simply echoed our own message; wait for the actual reply.
+          return;
+        }
+
+        final ChatMessage remoteMessage = decoded.copyWith(
+          userId: isLocal ? 'assistant' : decoded.userId,
+          timestamp: decoded.timestamp == 0 ? now : decoded.timestamp,
+        );
+        _messagesController.add(remoteMessage);
+
+        _awaitingTurn = false;
+        _updateCanSendValue();
+        final String normalized = remoteMessage.text.trim().toLowerCase();
+        if (normalized == 'done') {
+          _clearPlaybackLocks();
+          _finalizeConversationFromRemote();
+          return;
+        }
+        if (remoteMessage.text.trim().isNotEmpty) {
+          _pushPlaybackLock();
+        }
+        return;
+      }
+
       final bool isLikelySelfEcho =
           _lastSentMessageText != null &&
           _lastSentTimestampMs != null &&
           _lastSentMessageText == rawText &&
           (now - _lastSentTimestampMs!) < 1500;
 
-      final String localUserId = _userId ?? 'local';
+      if (isLikelySelfEcho) {
+        return;
+      }
 
       final ChatMessage message = ChatMessage(
         roomId: _roomId ?? _hardcodedRoomId,
-        userId: isLikelySelfEcho ? localUserId : 'remote',
+        userId: 'remote',
         text: rawText,
         timestamp: now,
       );
 
       _messagesController.add(message);
 
-      if (isLikelySelfEcho) {
-        _awaitingTurn = false;
-        _updateCanSendValue();
-        return;
-      }
-
       _awaitingTurn = false;
+      _updateCanSendValue();
       final String normalized = rawText.trim().toLowerCase();
       if (normalized == 'done') {
         _clearPlaybackLocks();
         _finalizeConversationFromRemote();
         return;
       }
-      _pushPlaybackLock();
+      if (message.text.trim().isNotEmpty) {
+        _pushPlaybackLock();
+      }
     } catch (error, stackTrace) {
       debugPrint('Erro ao processar mensagem do WebSocket: $error');
       _errorController.add(error);
@@ -522,5 +582,21 @@ class ChatSessionManager {
     }
     _pendingPlaybackLocks = 0;
     _updateCanSendValue();
+  }
+}
+
+extension on ChatMessage {
+  ChatMessage copyWith({
+    String? roomId,
+    String? userId,
+    String? text,
+    int? timestamp,
+  }) {
+    return ChatMessage(
+      roomId: roomId ?? this.roomId,
+      userId: userId ?? this.userId,
+      text: text ?? this.text,
+      timestamp: timestamp ?? this.timestamp,
+    );
   }
 }
