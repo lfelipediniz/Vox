@@ -216,16 +216,15 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                   color: Colors.redAccent,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
                   children: [
                     const Icon(Icons.error_outline, color: Colors.white, size: 18),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.white),
-                      ),
+                    Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: Colors.white),
                     ),
                   ],
                 ),
@@ -249,12 +248,12 @@ class _FloatingBubbleWidgetState extends State<FloatingBubbleWidget> {
                     ),
                   ],
                 ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: const Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
                   children: [
                     Icon(Icons.mic, color: Colors.white),
-                    SizedBox(width: 8),
                     Text(
                       'Gravando...',
                       style: TextStyle(
