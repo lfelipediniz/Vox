@@ -170,28 +170,6 @@ graph TB
 6. **Automação**: DroidRun executa as ações no dispositivo Android
 7. **Feedback**: O resultado é retornado ao usuário via áudio
 
-### Estrutura do Repositório
-
-```
-n8n_whatsapp/
-├── app/
-│   ├── main.py                 # Aplicação principal
-│   ├── mcp_servers/           
-│   │   └── droidrun.py        # MCP Server para DroidRun
-│   └── models/
-│       └── base/
-│           ├── abstract_agent.py    # Classe base para agentes
-│           ├── llm_provider.py      # Provedor de LLM
-│           └── prompt_provider.py   # Gerenciador de prompts
-├── prompts/
-│   └── uber_ride_creator.md   # Prompt do agente Uber
-├── workflows/
-│   └── Whatsapp Agent.json    # Workflow n8n
-├── docker-compose.yml         # Orquestração de containers
-├── Dockerfile                 # Imagem Docker
-└── requirements.txt           # Dependências Python
-```
-
 ---
 
 ## 🎬 Demonstração
@@ -212,59 +190,6 @@ O agente Uber demonstra o poder da plataforma Vox:
 5. ✅ Informa ao usuário que a corrida foi solicitada
 
 **Resultado**: Tarefa que levaria vários minutos e múltiplas interações é executada em **segundos** com **zero interação manual**.
-
----
-
-## 🚀 Instalação
-
-### Pré-requisitos
-
-- Docker e Docker Compose instalados
-- Dispositivo Android com DroidRun configurado
-- Acesso aos repositórios do projeto
-
-### Passo a Passo
-
-1. **Clone este repositório**:
-```bash
-git clone https://github.com/Educg550/n8n_whatsapp.git
-cd n8n_whatsapp
-```
-
-2. **Configure as variáveis de ambiente**:
-```bash
-cp .env.example .env
-# Edite o arquivo .env com suas configurações
-```
-
-3. **Inicie os containers**:
-```bash
-docker-compose up -d
-```
-
-4. **Acesse o n8n**:
-- URL: `http://localhost:5678`
-- Importe o workflow em `workflows/Whatsapp Agent.json`
-
-5. **Configure o MCP Server**:
-- O servidor MCP será iniciado automaticamente
-- Verifique os logs: `docker-compose logs -f`
-
-6. **Conecte o aplicativo Vox**:
-- Configure a URL do WebSocket API
-- Teste a conexão de voz
-
-### Desenvolvimento
-
-Para desenvolvimento local:
-
-```bash
-# Instale as dependências
-pip install -r requirements.txt
-
-# Execute a aplicação
-python app/main.py
-```
 
 ---
 
